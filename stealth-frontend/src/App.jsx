@@ -6,7 +6,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [mode, setMode] = useState('detect'); // 'detect' or 'humanize'
 
-  const handleProcess = async () => {
+const handleProcess = async () => {
     if (!inputText.trim()) return;
     setLoading(true);
     setResult(null);
@@ -14,8 +14,8 @@ export default function App() {
     const endpoint = mode === 'detect' ? '/api/detect' : '/api/humanize';
     
     try {
-      // Pointing to your local Node.js backend
-      const response = await fetch(`${endpoint}`, {
+      // Point directly to the new API subdomain
+      const response = await fetch(`https://stealth-api.raunit.dpdns.org${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: inputText }),
@@ -27,7 +27,7 @@ export default function App() {
       setResult(data);
     } catch (error) {
       console.error(error);
-      setResult({ error: "Failed to connect to backend API. Is it running?" });
+      setResult({ error: "Failed to connect to backend API." });
     } finally {
       setLoading(false);
     }
