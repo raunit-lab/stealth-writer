@@ -31,18 +31,38 @@ app.post('/api/detect', async (req, res) => {
 // Endpoint 2: Text Humanizer (Using Llama 3.2 for natural writing)
 app.post('/api/humanize', async (req, res) => {
     const { text } = req.body;
-    const prompt = `Rewrite this text to bypass AI detection. Use high burstiness (mix short and long sentences). Use an active, slightly conversational tone. Do not use words like 'delve', 'tapestry', or 'crucial'. Return ONLY the rewritten text. Original: "${text}"`;
+    
+    const prompt = `Rewrite the following text to sound 100% human. 
+    Rules:
+    1. Write like a senior engineer explaining this casually in a Slack channel.
+    2. Vary sentence length aggressively. Use very short 3-word sentences. Then use long, conversational ones.
+    3. Strip out ALL corporate jargon. Zero buzzwords.
+    4. Do not use words like: crucial, paramount, cutting-edge, navigate, realm, delve.
+    Original Text: "${text}"`;
 
     try {
         const response = await fetch(`${OLLAMA_URL}/api/generate`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ model: 'llama3.2:latest', prompt, stream: false })
+            body: JSON.stringify({ 
+                model: 'llama3.2:latest', 
+                prompt, 
+                stream: false,
+                options: {
+                    temperature: 1.3, // High temperature forces high perplexity/randomness
+                    top_p: 0.9      // Keeps it from turning into complete gibberish
+                }
+            })
         });
+        
         const data = await response.json();
+        
+        if (!response.ok) throw new Error(data.error || 'Failed to generate');
+
         res.json({ humanizedText: data.response });
     } catch (error) {
-        res.status(500).json({ error: 'Humanization failed' });
+        console.error("Humanize Error:", error.message);
+        res.status(500).json({ error: `Backend Error: ${error.message}` });
     }
 });
 
