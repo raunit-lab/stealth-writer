@@ -1,4 +1,3 @@
-// index.js
 import express from 'express';
 import cors from 'cors';
 import fetch from 'node-fetch';
@@ -10,83 +9,172 @@ app.use(express.json());
 
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
 
-// Endpoint 1: AI Detection (Using Qwen 2.5 for strict JSON logic)
+/* ------------------ UTILS ------------------ */
+
+// Sentence variance (burstiness)
+function getSentenceVariance(text) {
+    const sentences = text.split(/[.!?]/).filter(s => s.trim().length > 0);
+    if (sentences.length <= 1) return 0;
+
+    const lengths = sentences.map(s => s.split(' ').length);
+    const avg = lengths.reduce((a, b) => a + b, 0) / lengths.length;
+
+    const variance = lengths.reduce((a, b) => a + Math.pow(b - avg, 2), 0) / lengths.length;
+    return variance;
+}
+
+// Simple entropy (word diversity)
+function getWordEntropy(text) {
+    const words = text.toLowerCase().split(/\s+/).filter(Boolean);
+    const freq = {};
+
+    words.forEach(w => {
+        freq[w] = (freq[w] || 0) + 1;
+    });
+
+    const total = words.length;
+    let entropy = 0;
+
+    Object.values(freq).forEach(count => {
+        const p = count / total;
+        entropy -= p * Math.log2(p);
+    });
+
+    return entropy;
+}
+
+/* ------------------ DETECTION ------------------ */
+
 app.post('/api/detect', async (req, res) => {
     const { text } = req.body;
-    
-    // Strict mathematical grading rubric for Qwen
-    const prompt = `Act as an expert AI text detector. Analyze the following text and calculate an AI probability score.
-    Rules for calculating the score:
-    1. Start at a base score of 50.
-    2. Add 40 points if it uses highly formal or corporate words (e.g., delve, multifaceted, paramount, tapestry, crucial).
-    3. Add 20 points if all sentences are roughly the exact same length.
-    4. Subtract 40 points if it uses casual, conversational words (e.g., stuff, pretty simple, gotta, hey).
-    5. Subtract 20 points if sentence lengths vary dramatically (mix of very short and very long).
-    
-    Cap the final score between 0 and 100. 
-    Output ONLY a valid JSON object with exactly these two keys: "score" (a number) and "reason" (a short 1-sentence explanation).
-    
-    Text: "${text}"`;
 
     try {
+        // ---- Local signals ----
+        const variance = getSentenceVariance(text);
+        const entropy = getWordEntropy(text);
+
+        // Normalize signals
+        const varianceScore = Math.min(variance * 10, 100); // scaled
+        const entropyScore = Math.min(entropy * 20, 100);
+
+        // ---- LLM Prompt ----
+        const prompt = `
+You are an AI text detector.
+
+Analyze:
+- Predictability
+- Sentence variation
+- Human imperfections
+
+Return ONLY JSON:
+{
+  "score": number,
+  "confidence": number,
+  "reason": "short explanation"
+}
+
+Text:
+"${text}"
+`;
+
         const response = await fetch(`${OLLAMA_URL}/api/generate`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                model: 'qwen2.5:3b', 
-                prompt, 
-                stream: false, 
-                format: 'json',
-                options: { temperature: 0.1 } // Very low temp so the math is consistent
-            })
-        });
-        
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error || 'Failed to generate');
-
-        res.json(JSON.parse(data.response));
-    } catch (error) {
-        console.error("Detect Error:", error.message);
-        res.status(500).json({ error: `Backend Error: ${error.message}` });
-    }
-});
-
-app.post('/api/humanize', async (req, res) => {
-    const { text } = req.body;
-    
-    // The updated, strict prompt
-    const prompt = `Rewrite the following text to sound 100% human. 
-    Rules:
-    1. Write casually, like a quick message to a coworker.
-    2. Vary sentence length. Mix very short sentences with longer ones.
-    3. Strip out ALL corporate jargon (do not use words like: crucial, paramount, cutting-edge, navigate, realm, delve, tapestry).
-    4. FATAL RULE: DO NOT add any new information, analogies, examples, or greetings (like "Hey guys"). ONLY rewrite the exact meaning of the original text.
-    Original Text: "${text}"`;
-
-    try {
-        const response = await fetch(`${OLLAMA_URL}/api/generate`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                model: 'llama3.2:latest', 
-                prompt, 
+            body: JSON.stringify({
+                model: 'phi3:mini',
+                prompt,
                 stream: false,
+                format: 'json',
                 options: {
-                    temperature: 0.85, // Dialed back from 1.3 to prevent hallucinations
-                    top_p: 0.9      
+                    temperature: 0.2
                 }
             })
         });
-        
-        const data = await response.json();
-        
-        if (!response.ok) throw new Error(data.error || 'Failed to generate');
 
-        res.json({ humanizedText: data.response });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'LLM failed');
+
+        let llmResult = {};
+        try {
+            llmResult = JSON.parse(data.response);
+        } catch {
+            llmResult = { score: 50, confidence: 50, reason: "Fallback parsing" };
+        }
+
+        // ---- Final Score Fusion ----
+        const finalScore = Math.round(
+            (llmResult.score * 0.5) +
+            (varianceScore * 0.25) +
+            (entropyScore * 0.25)
+        );
+
+        res.json({
+            score: Math.max(0, Math.min(100, finalScore)),
+            confidence: llmResult.confidence || 60,
+            signals: {
+                variance: varianceScore.toFixed(2),
+                entropy: entropyScore.toFixed(2)
+            },
+            reason: llmResult.reason
+        });
+
     } catch (error) {
-        console.error("Humanize Error:", error.message);
-        res.status(500).json({ error: `Backend Error: ${error.message}` });
+        console.error("Detect Error:", error.message);
+        res.status(500).json({ error: error.message });
     }
 });
 
-app.listen(process.env.PORT, () => console.log(`API running on port ${process.env.PORT}`));
+/* ------------------ HUMANIZER ------------------ */
+
+app.post('/api/humanize', async (req, res) => {
+    const { text } = req.body;
+
+    const prompt = `
+Rewrite this text to sound like a real person wrote it casually.
+
+Rules:
+- Keep same meaning
+- Use contractions (don't, it's, etc.)
+- Mix short and long sentences
+- Slightly imperfect flow
+- No corporate tone
+- No extra information
+
+Text:
+"${text}"
+`;
+
+    try {
+        const response = await fetch(`${OLLAMA_URL}/api/generate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                model: 'gemma:2b',
+                prompt,
+                stream: false,
+                options: {
+                    temperature: 0.8,
+                    top_p: 0.9
+                }
+            })
+        });
+
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Humanizer failed');
+
+        res.json({
+            humanizedText: data.response
+        });
+
+    } catch (error) {
+        console.error("Humanize Error:", error.message);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+/* ------------------ SERVER ------------------ */
+
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => {
+    console.log(`✅ API running on port ${PORT}`);
+});
