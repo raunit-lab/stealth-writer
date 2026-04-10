@@ -1,0 +1,33 @@
+name: Deploy Stealth Writer
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Sync Code to Apps Directory
+        run: |
+          mkdir -p /srv/apps/stealth-writer
+          # Syncs the repo into the apps folder, ignoring the infra folder
+          rsync -avz --exclude='infra' --delete ./ /srv/apps/stealth-writer/
+
+      - name: Sync Infrastructure Config
+        run: |
+          mkdir -p /srv/infra/stealth-writer
+          # Copies the docker-compose file to the infra folder
+          cp infra/docker-compose.yml /srv/infra/stealth-writer/
+
+      - name: Build and Restart Docker Containers
+        run: |
+          cd /srv/infra/stealth-writer
+          docker compose build
+          docker compose up -d --force-recreate
+          docker image prune -f
