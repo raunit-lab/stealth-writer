@@ -37,7 +37,7 @@ app.post('/api/humanize', async (req, res) => {
         const response = await fetch(`${OLLAMA_URL}/api/generate`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ model: 'llama3.2', prompt, stream: false })
+            body: JSON.stringify({ model: 'llama3.2:latest', prompt, stream: false })
         });
         const data = await response.json();
         res.json({ humanizedText: data.response });
