@@ -13,18 +13,41 @@ const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
 // Endpoint 1: AI Detection (Using Qwen 2.5 for strict JSON logic)
 app.post('/api/detect', async (req, res) => {
     const { text } = req.body;
-    const prompt = `Analyze this text for AI generation. Look for low burstiness and high perplexity. Output ONLY a JSON object with a "score" (0-100) and a short "reason". Text: "${text}"`;
+    
+    // Strict mathematical grading rubric for Qwen
+    const prompt = `Act as an expert AI text detector. Analyze the following text and calculate an AI probability score.
+    Rules for calculating the score:
+    1. Start at a base score of 50.
+    2. Add 40 points if it uses highly formal or corporate words (e.g., delve, multifaceted, paramount, tapestry, crucial).
+    3. Add 20 points if all sentences are roughly the exact same length.
+    4. Subtract 40 points if it uses casual, conversational words (e.g., stuff, pretty simple, gotta, hey).
+    5. Subtract 20 points if sentence lengths vary dramatically (mix of very short and very long).
+    
+    Cap the final score between 0 and 100. 
+    Output ONLY a valid JSON object with exactly these two keys: "score" (a number) and "reason" (a short 1-sentence explanation).
+    
+    Text: "${text}"`;
 
     try {
         const response = await fetch(`${OLLAMA_URL}/api/generate`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ model: 'qwen2.5:3b', prompt, stream: false, format: 'json' })
+            body: JSON.stringify({ 
+                model: 'qwen2.5:3b', 
+                prompt, 
+                stream: false, 
+                format: 'json',
+                options: { temperature: 0.1 } // Very low temp so the math is consistent
+            })
         });
+        
         const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Failed to generate');
+
         res.json(JSON.parse(data.response));
     } catch (error) {
-        res.status(500).json({ error: 'Detection failed' });
+        console.error("Detect Error:", error.message);
+        res.status(500).json({ error: `Backend Error: ${error.message}` });
     }
 });
 
