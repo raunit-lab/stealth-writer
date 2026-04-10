@@ -28,16 +28,16 @@ app.post('/api/detect', async (req, res) => {
     }
 });
 
-// Endpoint 2: Text Humanizer (Using Llama 3.2 for natural writing)
 app.post('/api/humanize', async (req, res) => {
     const { text } = req.body;
     
+    // The updated, strict prompt
     const prompt = `Rewrite the following text to sound 100% human. 
     Rules:
-    1. Write like a senior engineer explaining this casually in a Slack channel.
-    2. Vary sentence length aggressively. Use very short 3-word sentences. Then use long, conversational ones.
-    3. Strip out ALL corporate jargon. Zero buzzwords.
-    4. Do not use words like: crucial, paramount, cutting-edge, navigate, realm, delve.
+    1. Write casually, like a quick message to a coworker.
+    2. Vary sentence length. Mix very short sentences with longer ones.
+    3. Strip out ALL corporate jargon (do not use words like: crucial, paramount, cutting-edge, navigate, realm, delve, tapestry).
+    4. FATAL RULE: DO NOT add any new information, analogies, examples, or greetings (like "Hey guys"). ONLY rewrite the exact meaning of the original text.
     Original Text: "${text}"`;
 
     try {
@@ -49,8 +49,8 @@ app.post('/api/humanize', async (req, res) => {
                 prompt, 
                 stream: false,
                 options: {
-                    temperature: 1.3, // High temperature forces high perplexity/randomness
-                    top_p: 0.9      // Keeps it from turning into complete gibberish
+                    temperature: 0.85, // Dialed back from 1.3 to prevent hallucinations
+                    top_p: 0.9      
                 }
             })
         });
